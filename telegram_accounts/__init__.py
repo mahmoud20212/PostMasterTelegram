@@ -1,0 +1,1 @@
+"""Connected Telethon account domain."""

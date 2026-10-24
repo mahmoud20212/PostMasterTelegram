@@ -1,0 +1,1 @@
+"""Saved advertising messages domain."""

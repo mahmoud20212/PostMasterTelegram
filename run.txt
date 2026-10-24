@@ -1,0 +1,5 @@
+docker compose up -d redis
+docker run -it --rm --name redis -p 6379:6379 redis
+.\.venv\Scripts\celery.exe -A config worker --loglevel=INFO --pool=solo
+.\.venv\Scripts\celery.exe -A config beat --loglevel=INFO
+.\.venv\Scripts\python.exe -m bot.main

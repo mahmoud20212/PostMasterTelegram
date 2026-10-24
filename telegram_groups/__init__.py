@@ -1,0 +1,1 @@
+"""Target Telegram groups domain."""
