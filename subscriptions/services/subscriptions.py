@@ -112,6 +112,7 @@ def _check_limit(*, telegram_user_id: int, resource: str) -> None:
         raise SubscriptionLimitExceeded(resource, limit)
 
 
+check_limit_sync = _check_limit
 check_limit = sync_to_async(_check_limit)
 
 

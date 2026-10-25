@@ -6,3 +6,5 @@ redis>=5.0,<6.0
 python-dotenv>=1.0,<2.0
 cryptography>=42.0,<46.0
 
+gunicorn>=23,<24
+whitenoise>=6.0,<7.0

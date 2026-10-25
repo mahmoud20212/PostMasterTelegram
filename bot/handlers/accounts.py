@@ -12,6 +12,10 @@ from telegram_accounts.services.accounts import complete_login, complete_passwor
 from users.services.dashboard import get_dashboard_counts
 from users.services.onboarding import get_telegram_user
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 router = Router(name="accounts")
 
 
@@ -176,10 +180,16 @@ async def verify_code(message: Message, state: FSMContext) -> None:
         return
     try:
         verified = await complete_login(telegram_user_id=message.from_user.id, code=code)
-    except Exception:
-        await message.answer("رمز التحقق غير صحيح أو انتهت صلاحيته. ابدأ إضافة الحساب من جديد.")
-        await state.clear()
-        return
+    except Exception as error:
+    	logger.error(
+        	"Telegram account verification failed: %s",
+        	type(error).__name__,
+    	)
+    	await message.answer(
+        	"⚠️ تعذر إكمال ربط الحساب، يرجى المحاولة لاحقًا"
+    	)
+    	await state.clear()
+    	return
     if not verified:
         await state.set_state(AccountForm.waiting_for_password)
         await message.answer("🔐 الحساب محمي بالتحقق بخطوتين. أرسل كلمة مرور 2FA:")
