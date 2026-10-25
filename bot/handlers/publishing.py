@@ -39,8 +39,8 @@ async def start_publishing_handler(callback: CallbackQuery) -> None:
 async def stop_publishing_handler(callback: CallbackQuery) -> None:
     if callback.from_user is None:
         return
-    await stop_publishing(callback.from_user.id)
-    await callback.answer("تم إيقاف النشر.")
+    text = await stop_publishing(callback.from_user.id)
+    await callback.answer(text, show_alert=text != "تم إيقاف النشر.")
     await _refresh_main_menu(callback)
 
 

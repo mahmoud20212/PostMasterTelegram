@@ -115,6 +115,21 @@ LOGGING = {
 
 CELERY_BROKER_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
 CELERY_RESULT_BACKEND = CELERY_BROKER_URL
+# Bound producer network waits; DB transitions and broker publication are separate.
+CELERY_BROKER_CONNECTION_TIMEOUT = 3
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    "socket_connect_timeout": 3,
+    "socket_timeout": 3,
+    "retry_on_timeout": False,
+    "max_retries": 1,
+}
+CELERY_TASK_PUBLISH_RETRY = True
+CELERY_TASK_PUBLISH_RETRY_POLICY = {
+    "max_retries": 1,
+    "interval_start": 0.2,
+    "interval_step": 0,
+    "interval_max": 0.2,
+}
 CELERY_BEAT_SCHEDULE = {
     "expire-subscriptions-hourly": {
         "task": "subscriptions.expire_subscriptions",

@@ -1,4 +1,23 @@
+import uuid
+
 from django.db import models
+
+
+class PublishingRun(models.Model):
+    """Persistent generation; a stopped run is never reused."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey("users.User", on_delete=models.CASCADE, related_name="publishing_runs")
+    account = models.ForeignKey("telegram_accounts.TelegramAccount", null=True, on_delete=models.SET_NULL)
+    active = models.BooleanField(default=True)
+    task_claimed = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    stopped_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user"], condition=models.Q(active=True), name="one_active_publishing_run"),
+        ]
 
 
 class PublishingSettings(models.Model):
