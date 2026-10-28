@@ -1,0 +1,36 @@
+# Deny by default; no .env, DB, auth sessions, .git, .aws, or host virtualenv.
+**
+!requirements.txt
+!manage.py
+!config/
+!config/**/*.py
+!bot/
+!bot/**/*.py
+!users/
+!users/**/*.py
+!messages/
+!messages/**/*.py
+!publishing/
+!publishing/**/*.py
+!subscriptions/
+!subscriptions/**/*.py
+!telegram_accounts/
+!telegram_accounts/**/*.py
+!telegram_groups/
+!telegram_groups/**/*.py
+!reports/
+!reports/**/*.py
+!staging/
+!staging/**/*.py
+# Final exclusions also apply inside allowed application directories.
+**/.env
+**/.env.*
+**/*.session*
+**/*.sqlite*
+**/.aws
+**/.git
+**/.venv
+**/venv
+**/__pycache__
+**/*.pyc
+**/logs

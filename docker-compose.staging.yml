@@ -1,0 +1,70 @@
+# Standalone file. Never merge this with docker-compose.yml.
+name: onepost-staging
+
+x-app: &app
+  image: onepost-staging:local
+  build:
+    context: .
+    dockerfile: Dockerfile.staging
+  entrypoint: ["python", "-m", "staging.launch"]
+  environment:
+    ONEPOST_STAGING: "1"
+    DJANGO_SETTINGS_MODULE: config.staging_settings
+    REDIS_URL: redis://staging-redis:6379/0
+    PYTHONDONTWRITEBYTECODE: "1"
+    PYTHONUNBUFFERED: "1"
+  volumes:
+    - staging_data:/staging-data
+  networks: [staging_internal]
+  read_only: true
+  tmpfs:
+    - /tmp:size=268435456,mode=1777
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 128
+  cpus: 0.75
+  mem_limit: 512m
+  restart: "no"
+  logging:
+    driver: json-file
+    options: {max-size: "5m", max-file: "2"}
+
+services:
+  staging-redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "96mb", "--maxmemory-policy", "noeviction"]
+    volumes: [staging_redis:/data]
+    networks: [staging_internal]
+    mem_limit: 192m
+    cpus: 0.25
+    pids_limit: 64
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+    logging:
+      options: {max-size: "5m", max-file: "2"}
+
+  django:
+    <<: *app
+    command: ["web"]
+    depends_on:
+      staging-redis: {condition: service_healthy}
+
+  worker:
+    <<: *app
+    command: ["worker", "--loglevel=INFO", "--pool=solo", "--concurrency=1", "--prefetch-multiplier=1", "--queues=onepost-staging", "--hostname=staging@%h", "--without-gossip", "--without-mingle"]
+    stop_grace_period: 30s
+    depends_on:
+      staging-redis: {condition: service_healthy}
+
+# No bot, Beat, published ports, host bind mounts, or external networks.
+networks:
+  staging_internal:
+    internal: true
+
+volumes:
+  staging_data:
+  staging_redis:

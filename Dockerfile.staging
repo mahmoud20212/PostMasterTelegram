@@ -1,0 +1,14 @@
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+RUN groupadd --gid 1000 staging \
+    && useradd --uid 1000 --gid 1000 --create-home staging \
+    && mkdir -p /staging-data /app/logs \
+    && chown -R 1000:1000 /staging-data /app/logs
+# The Dockerfile-specific ignore file allowlists app paths and excludes runtime data.
+COPY . /app
+RUN python -c "from pathlib import Path; p=Path('/app'); assert (p/'publishing/migrations/0007_publishingrun.py').is_file(); assert (p/'staging/management/commands/staging_probe.py').is_file(); assert not any(f.name.startswith('.env') or '.session' in f.name or '.sqlite' in f.name for f in p.rglob('*') if f.is_file()), 'Forbidden runtime data in staging image'"
+USER 1000:1000
+ENTRYPOINT ["python", "-m", "staging.launch"]
+CMD ["manage", "check"]

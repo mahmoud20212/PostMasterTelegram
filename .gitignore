@@ -6,6 +6,13 @@ __pycache__/
 .env
 .env.*
 !.env.example
+!.env.staging.example
+.staging/
+*.session
+*.session-journal
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
 staticfiles/
 media/
 .pytest_cache/
