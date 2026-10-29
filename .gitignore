@@ -8,6 +8,8 @@ __pycache__/
 !.env.example
 !.env.staging.example
 !.env.postgres-staging.example
+!.env.production.example
+.production/
 *.pgdump
 *.sql.gz
 .staging/

@@ -1,0 +1,124 @@
+# Standalone only. Never merge with the old or staging Compose files.
+name: onepost-fresh
+x-app: &app
+  image: ${ONEPOST_IMAGE:?Set the audited release image}
+  pull_policy: never
+  user: "1000:1000"
+  entrypoint: [python, -m, production.entrypoint]
+  restart: unless-stopped
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:size=67108864,mode=1777
+    - /app/logs:size=8388608,uid=1000,gid=1000,mode=0700
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 128
+  cpus: 0.5
+  environment: &app-env
+    DJANGO_SETTINGS_MODULE: config.fresh_production_settings
+    DJANGO_DEBUG: "False"
+    DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?Set allowed hosts}
+    DATABASE_BACKEND: postgresql
+    POSTGRES_HOST: fresh-postgres
+    POSTGRES_DB: onepost_fresh
+    POSTGRES_USER: onepost_app
+    POSTGRES_SSLMODE: disable
+    REDIS_URL: redis://fresh-redis:6379/0
+    PYTHONDONTWRITEBYTECODE: "1"
+    ONEPOST_POLLING_HANDOFF: ${ONEPOST_POLLING_HANDOFF:-pending}
+  secrets: [postgres_password, django_secret_key, telegram_bot_token, telegram_api_id, telegram_api_hash, telegram_session_encryption_key]
+  networks: [data, outbound]
+  depends_on:
+    fresh-postgres: {condition: service_healthy}
+    fresh-redis: {condition: service_healthy}
+  healthcheck:
+    test: [CMD, python, -m, production.entrypoint, python, -m, production.verify]
+    interval: 60s
+    timeout: 10s
+    retries: 3
+    start_period: 30s
+  logging: &logging
+    driver: json-file
+    options: {max-size: "5m", max-file: "2"}
+
+services:
+  fresh-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: onepost_fresh
+      POSTGRES_USER: onepost_bootstrap
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+    secrets: [postgres_admin_password, postgres_password]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./production/init-postgres.sh:/docker-entrypoint-initdb.d/10-app.sh:ro
+    networks: [data]
+    command: [postgres, -c, shared_buffers=64MB, -c, work_mem=1MB, -c, maintenance_work_mem=16MB, -c, max_connections=20, -c, autovacuum_max_workers=1, -c, autovacuum_work_mem=8MB, -c, min_wal_size=32MB, -c, max_wal_size=128MB, -c, log_min_error_statement=panic, -c, log_error_verbosity=terse]
+    mem_limit: 320m
+    cpus: 0.5
+    pids_limit: 100
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U onepost_bootstrap -d onepost_fresh]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    logging: *logging
+
+  fresh-redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: [redis-server, --appendonly, "yes", --maxmemory, 48mb, --maxmemory-policy, noeviction]
+    volumes: [redis_data:/data]
+    networks: [data]
+    mem_limit: 96m
+    cpus: 0.25
+    pids_limit: 64
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging: *logging
+
+  web:
+    <<: *app
+    mem_limit: 192m
+    command: [sh, -c, 'python manage.py collectstatic --noinput --verbosity 0 && exec gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 1 --timeout 60 --worker-tmp-dir /tmp']
+    ports: ["127.0.0.1:18000:8000"]
+
+  bot:
+    <<: *app
+    profiles: [live]
+    mem_limit: 256m
+    command: [python, -m, bot.main]
+
+  celery-worker:
+    <<: *app
+    profiles: [live]
+    mem_limit: 320m
+    stop_grace_period: 60s
+    command: [celery, -A, config, worker, --loglevel=INFO, --pool=solo, --hostname=fresh@%h]
+
+  celery-beat:
+    <<: *app
+    profiles: [live]
+    mem_limit: 128m
+    command: [celery, -A, config, beat, --loglevel=INFO, --schedule=/tmp/celerybeat-schedule]
+
+networks:
+  data: {internal: true}
+  outbound: {}
+volumes:
+  postgres_data: {}
+  redis_data: {}
+secrets:
+  postgres_admin_password: {file: ./.production/secrets/postgres_admin_password}
+  postgres_password: {file: ./.production/secrets/postgres_password}
+  django_secret_key: {file: ./.production/secrets/django_secret_key}
+  telegram_bot_token: {file: ./.production/secrets/telegram_bot_token}
+  telegram_api_id: {file: ./.production/secrets/telegram_api_id}
+  telegram_api_hash: {file: ./.production/secrets/telegram_api_hash}
+  telegram_session_encryption_key: {file: ./.production/secrets/telegram_session_encryption_key}

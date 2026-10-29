@@ -23,6 +23,8 @@
 !reports/**/*.py
 !staging/
 !staging/**/*.py
+!production/
+!production/**/*.py
 !templates/
 !templates/**
 !static/
