@@ -10,8 +10,9 @@ to a public server or implicit production URL.
 
 `requirements-postgres.txt` adds psycopg 3 without editing the existing dependency
 files. Dockerfile.staging selects it only for this rehearsal's build argument.
-The production image will need a separately approved driver/image change before
-any future cutover; setting env vars on the old image alone is insufficient.
+The subsequent Docker-blocker fix also installs the driver in the production
+Dockerfile; see `PRODUCTION_IMAGE.md` for local production-image validation.
+Setting env vars on an old image without that driver is still insufficient.
 
 `docker-compose.postgres-staging.yml` is standalone: project
 `onepost-pg-staging`, internal network, no published ports, no bot/worker/Beat or
@@ -263,12 +264,12 @@ PostgreSQL production cutover; a settings-only switch on the old image is unsafe
 - Both rehearsal projects were shut down without deleting volumes. Synthetic input,
   local-only credentials and dump are ignored under `.staging/`/`.env.postgres-staging`.
 
-The original AWS data and resource headroom were not inspected or changed. Future
-production image preparation must also audit its build context: the existing
-production Dockerfile uses `COPY . .`; the staging-specific ignore file does not
-protect an unrelated production build. Do not package this working directory's
-local env, dumps or snapshots into a future production image. That image/secret
-hardening and the actual cutover require a separate approved deployment review.
+The original AWS data and resource headroom were not inspected or changed. The
+subsequent Docker-blocker fix adds a root production-effective `.dockerignore`
+and PostgreSQL driver installation; `PRODUCTION_IMAGE.md` records canary and
+all-layer image inspection plus tests using that production image. Runtime env
+and bind mounts still require their own review. Local env, dumps and snapshots
+must remain outside the image. Actual cutover requires separate approval.
 
 References: [Django serialization](https://docs.djangoproject.com/en/5.2/topics/serialization/),
 [PostgreSQL memory](https://www.postgresql.org/docs/16/runtime-config-resource.html),
