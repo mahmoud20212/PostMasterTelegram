@@ -24,6 +24,7 @@ from publishing.services.policy import mark_limit_notified, release_send_slot, r
 from publishing.services.runs import (
     ELIGIBLE_GROUP_STATUSES, claim_run, create_run_async, finish_run_async,
     run_is_active, run_policy, send_target_allowed,
+    update_run_settings,
 )
 from publishing.services.contention import is_sqlite_contention
 
@@ -129,26 +130,17 @@ def get_publish_snapshot(telegram_user_id: int, run_id=None) -> dict:
 
 @sync_to_async
 def advance_cycle_indices(*, telegram_user_id: int, run_id, message_index: int, group_index: int) -> None:
-    PublishingSettings.objects.filter(
-        user__telegram_user_id=telegram_user_id, user__publishing_runs__id=run_id,
-        user__publishing_runs__active=True, user__is_publishing=True,
-    ).update(current_message_index=message_index, current_group_index=group_index)
+    update_run_settings(telegram_user_id, run_id, current_message_index=message_index, current_group_index=group_index)
 
 
 @sync_to_async
 def set_cycle_started_at(*, telegram_user_id: int, run_id, started_at) -> None:
-    PublishingSettings.objects.filter(
-        user__telegram_user_id=telegram_user_id, user__publishing_runs__id=run_id,
-        user__publishing_runs__active=True, user__is_publishing=True,
-    ).update(cycle_started_at=started_at)
+    update_run_settings(telegram_user_id, run_id, cycle_started_at=started_at)
 
 
 @sync_to_async
 def set_next_cycle_at(*, telegram_user_id: int, run_id, next_cycle_at) -> None:
-    PublishingSettings.objects.filter(
-        user__telegram_user_id=telegram_user_id, user__publishing_runs__id=run_id,
-        user__publishing_runs__active=True, user__is_publishing=True,
-    ).update(next_cycle_at=next_cycle_at)
+    update_run_settings(telegram_user_id, run_id, next_cycle_at=next_cycle_at)
 
 
 @sync_to_async

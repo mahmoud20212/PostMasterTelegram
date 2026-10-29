@@ -7,6 +7,9 @@ __pycache__/
 .env.*
 !.env.example
 !.env.staging.example
+!.env.postgres-staging.example
+*.pgdump
+*.sql.gz
 .staging/
 *.session
 *.session-journal

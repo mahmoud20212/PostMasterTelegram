@@ -1,6 +1,7 @@
 # Deny by default; no .env, DB, auth sessions, .git, .aws, or host virtualenv.
 **
 !requirements.txt
+!requirements-postgres.txt
 !manage.py
 !config/
 !config/**/*.py

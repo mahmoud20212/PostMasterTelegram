@@ -63,7 +63,9 @@ TEMPLATES = [{
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
-DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}}
+from config.database import database_config
+
+DATABASES = {"default": database_config(os.environ, BASE_DIR)}
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"

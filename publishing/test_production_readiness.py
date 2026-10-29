@@ -4,6 +4,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import timedelta
 from threading import Event
+from unittest import skipUnless
 from unittest.mock import AsyncMock, patch
 
 from asgiref.sync import async_to_sync
@@ -155,6 +156,7 @@ class ProductionReadinessTests(SessionFixtures, TransactionTestCase):
             with self.assertRaises(OperationalError):
                 async_to_sync(engine.start_publishing)(101)
 
+    @skipUnless(connection.vendor == "sqlite", "SQLite-specific contention retry policy")
     def test_retry_rolls_back_transition_and_enqueues_only_once(self):
         original = PublishingRun.objects.create
         attempts = []
@@ -172,6 +174,7 @@ class ProductionReadinessTests(SessionFixtures, TransactionTestCase):
         self.assertEqual(PublishingRun.objects.filter(active=True).count(), 1)
         broker.assert_called_once()
 
+    @skipUnless(connection.vendor == "sqlite", "SQLite-specific contention retry policy")
     def test_contention_retries_are_bounded(self):
         calls = []
 

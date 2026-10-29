@@ -1,0 +1,94 @@
+# Standalone rehearsal only; never merge with production Compose.
+name: onepost-pg-staging
+services:
+  staging-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: onepost_staging
+      POSTGRES_USER: onepost_staging
+      POSTGRES_PASSWORD: ${PG_STAGING_PASSWORD:?Generate a local staging password first}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=64MB
+      - -c
+      - work_mem=1MB
+      - -c
+      - maintenance_work_mem=16MB
+      - -c
+      - autovacuum_max_workers=1
+      - -c
+      - autovacuum_work_mem=8MB
+      - -c
+      - max_connections=12
+      - -c
+      - temp_buffers=2MB
+      - -c
+      - wal_buffers=4MB
+      - -c
+      - min_wal_size=32MB
+      - -c
+      - max_wal_size=128MB
+      - -c
+      - log_min_error_statement=panic
+      - -c
+      - log_error_verbosity=terse
+    volumes: [pg_data:/var/lib/postgresql/data]
+    networks: [isolated]
+    mem_limit: 320m
+    cpus: 0.5
+    pids_limit: 100
+    restart: "no"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U onepost_staging -d onepost_staging"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+    logging:
+      options: {max-size: "5m", max-file: "2"}
+
+  tools:
+    image: onepost-pg-staging:local
+    build:
+      context: .
+      dockerfile: Dockerfile.staging
+      args: {REQUIREMENTS_FILE: requirements-postgres.txt}
+    entrypoint: ["python", "-m", "staging.launch"]
+    command: ["manage", "check"]
+    environment:
+      ONEPOST_STAGING: "1"
+      DJANGO_SETTINGS_MODULE: config.postgres_staging_settings
+      DATABASE_BACKEND: postgresql
+      POSTGRES_HOST: staging-postgres
+      POSTGRES_DB: onepost_staging
+      POSTGRES_USER: onepost_staging
+      POSTGRES_PASSWORD: ${PG_STAGING_PASSWORD:?Generate a local staging password first}
+      POSTGRES_SSLMODE: disable
+      REDIS_URL: redis://staging-redis:6379/0
+      PYTHONDONTWRITEBYTECODE: "1"
+    volumes:
+      - pg_artifacts:/staging-data
+      - type: bind
+        source: ./.staging/pg-input
+        target: /migration-input
+        read_only: true
+        bind: {create_host_path: false}
+    networks: [isolated]
+    read_only: true
+    tmpfs: ["/tmp:size=134217728,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 384m
+    cpus: 0.75
+    pids_limit: 128
+    restart: "no"
+    depends_on:
+      staging-postgres: {condition: service_healthy}
+    logging:
+      options: {max-size: "5m", max-file: "2"}
+
+networks:
+  isolated: {internal: true}
+volumes:
+  pg_data:
+  pg_artifacts:

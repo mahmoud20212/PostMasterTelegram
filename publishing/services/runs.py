@@ -5,6 +5,7 @@ updates serialize competing starts; no database transaction spans Telegram I/O.
 """
 from asgiref.sync import sync_to_async
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 
 from messages.models import SavedMessage
@@ -63,37 +64,60 @@ def create_run(telegram_user_id):
 @retry_transition
 def finish_run(telegram_user_id, run_id=None):
     with transaction.atomic():
-        users = User.objects.filter(telegram_user_id=telegram_user_id)
-        if run_id is not None:
-            users = users.filter(publishing_runs__id=run_id, publishing_runs__active=True)
-        # The write is first, with the ownership predicate in the same statement.
-        if not users.update(is_publishing=False):
+        user = _lock_user(telegram_user_id)
+        if user is None:
             return False
-        runs = PublishingRun.objects.filter(user__telegram_user_id=telegram_user_id, active=True)
+        runs = PublishingRun.objects.filter(user_id=user.pk, active=True)
         if run_id is not None:
             runs = runs.filter(pk=run_id)
+            if not runs.exists():
+                return False
+        User.objects.filter(pk=user.pk).update(is_publishing=False)
         runs.update(active=False, stopped_at=timezone.now())
-        PublishingSettings.objects.filter(user__telegram_user_id=telegram_user_id).update(is_running=False)
+        PublishingSettings.objects.filter(user_id=user.pk).update(is_running=False)
         return True
+
+
+def _lock_user(telegram_user_id):
+    # First-write serialization works on SQLite and obtains the row lock on PG.
+    # Re-read ownership AFTER this lock: joined UPDATE subqueries can retain a
+    # stale run snapshot when PostgreSQL waits on a concurrently modified row.
+    users = User.objects.filter(telegram_user_id=telegram_user_id)
+    if not users.update(is_publishing=F("is_publishing")):
+        return None
+    return users.get()
+
+
+@retry_transition
+def update_run_settings(telegram_user_id, run_id, **changes):
+    with transaction.atomic():
+        user = _lock_user(telegram_user_id)
+        if user is None or not user.is_publishing:
+            return False
+        if not PublishingRun.objects.filter(pk=run_id, user_id=user.pk, active=True).exists():
+            return False
+        return bool(PublishingSettings.objects.filter(user_id=user.pk).update(**changes))
 
 
 @retry_transition
 def recover_legacy_user(telegram_user_id):
     """Administrative operation: never touches a user with a new active run."""
     with transaction.atomic():
-        changed = User.objects.filter(
-            telegram_user_id=telegram_user_id, is_publishing=True,
-        ).exclude(publishing_runs__active=True).update(is_publishing=False)
-        if changed:
-            PublishingSettings.objects.filter(user__telegram_user_id=telegram_user_id).update(is_running=False)
-        return bool(changed)
+        user = _lock_user(telegram_user_id)
+        if user is None or not user.is_publishing:
+            return False
+        if PublishingRun.objects.filter(user_id=user.pk, active=True).exists():
+            return False
+        User.objects.filter(pk=user.pk).update(is_publishing=False)
+        PublishingSettings.objects.filter(user_id=user.pk).update(is_running=False)
+        return True
 
 
 @sync_to_async
 def claim_run(telegram_user_id, run_id):
+    users = User.objects.filter(telegram_user_id=telegram_user_id, is_publishing=True).values("pk")
     return bool(PublishingRun.objects.filter(
-        pk=run_id, user__telegram_user_id=telegram_user_id,
-        user__is_publishing=True, active=True, task_claimed=False,
+        pk=run_id, user_id__in=users, active=True, task_claimed=False,
     ).update(task_claimed=True))
 
 
