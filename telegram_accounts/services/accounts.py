@@ -2,6 +2,8 @@ from asgiref.sync import sync_to_async
 
 from telegram_accounts.models import TelegramAccount
 from users.models import User
+from django.utils import timezone
+from publishing.services.contention import bounded_transaction, retry_transition
 
 _pending_clients = {}
 
@@ -64,13 +66,21 @@ async def _store_connected_session(*, telegram_user_id: int, client) -> None:
 
 
 @sync_to_async
+@retry_transition
 def save_connected_account(*, telegram_user_id: int, telegram_account_id: int, username: str, encrypted_session: str):
-    account = TelegramAccount.objects.filter(user__telegram_user_id=telegram_user_id, status="pending").order_by("-id").first()
-    account.telegram_user_id = telegram_account_id
-    account.username = username
-    account.encrypted_session = encrypted_session
-    account.status = "connected"
-    account.save(update_fields=["telegram_user_id", "username", "encrypted_session", "status", "last_connected_at"])
+    from publishing.services.runs import _lock_user
+    with bounded_transaction():
+        user = _lock_user(telegram_user_id)
+        account = TelegramAccount.objects.filter(user=user, status="pending").order_by("-id").first()
+        if account is None:
+            raise ValueError("لا يوجد حساب بانتظار إكمال الربط.")
+        account.telegram_user_id = telegram_account_id
+        account.username = username
+        account.encrypted_session = encrypted_session
+        account.status = "connected"
+        account.last_connected_at = timezone.now()
+        account.is_publishing_account = not TelegramAccount.objects.filter(user=user, is_publishing_account=True).exists()
+        account.save(update_fields=["telegram_user_id", "username", "encrypted_session", "status", "last_connected_at", "is_publishing_account"])
 
 
 @sync_to_async
@@ -79,16 +89,16 @@ def list_accounts(*, telegram_user_id: int) -> list[TelegramAccount]:
 
 
 @sync_to_async
+@retry_transition
 def select_publishing_account(*, telegram_user_id: int, account_id: int) -> TelegramAccount:
-    account = TelegramAccount.objects.get(
-        id=account_id,
-        user__telegram_user_id=telegram_user_id,
-        status="connected",
-    )
-    TelegramAccount.objects.filter(user__telegram_user_id=telegram_user_id).update(is_publishing_account=False)
-    account.is_publishing_account = True
-    account.save(update_fields=["is_publishing_account"])
-    return account
+    from publishing.services.runs import _lock_user
+    with bounded_transaction():
+        user = _lock_user(telegram_user_id)
+        account = TelegramAccount.objects.get(id=account_id, user=user, status="connected")
+        TelegramAccount.objects.filter(user=user, is_publishing_account=True).update(is_publishing_account=False)
+        account.is_publishing_account = True
+        account.save(update_fields=["is_publishing_account"])
+        return account
 
 
 @sync_to_async

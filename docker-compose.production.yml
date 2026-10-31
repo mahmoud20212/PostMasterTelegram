@@ -1,124 +1,216 @@
-# Standalone only. Never merge with the old or staging Compose files.
-name: onepost-fresh
+name: onepost-production
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-environment: &environment
+  DJANGO_SETTINGS_MODULE: config.settings.production
+  PUBLIC_IP: ${PUBLIC_IP:?Set PUBLIC_IP in .env.production}
+  DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
+  DB_PASSWORD_FILE: /run/secrets/db_password
+  REDIS_PASSWORD_FILE: /run/secrets/redis_password
+  TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
+  TELEGRAM_API_ID_FILE: /run/secrets/telegram_api_id
+  TELEGRAM_API_HASH_FILE: /run/secrets/telegram_api_hash
+  TELEGRAM_SESSION_ENCRYPTION_KEY_FILE: /run/secrets/session_key
+  ONEPOST_REQUIRED_GROUP_CHAT_ID: ${ONEPOST_REQUIRED_GROUP_CHAT_ID:-@onepost_group}
+  ONEPOST_REQUIRED_GROUP_URL: ${ONEPOST_REQUIRED_GROUP_URL:-https://t.me/onepost_group}
+  PUBLISHING_USE_BEAT: "false"
+
 x-app: &app
-  image: ${ONEPOST_IMAGE:?Set the audited release image}
-  pull_policy: never
-  user: "1000:1000"
-  entrypoint: [python, -m, production.entrypoint]
-  restart: unless-stopped
+  image: ${APP_IMAGE:-onepost:production}
+  build:
+    context: .
+    dockerfile: Dockerfile
   init: true
+  restart: unless-stopped
   read_only: true
   tmpfs:
-    - /tmp:size=67108864,mode=1777
-    - /app/logs:size=8388608,uid=1000,gid=1000,mode=0700
+    - /tmp:mode=1777
   cap_drop: [ALL]
   security_opt: [no-new-privileges:true]
-  pids_limit: 128
-  cpus: 0.5
-  environment: &app-env
-    DJANGO_SETTINGS_MODULE: config.fresh_production_settings
-    DJANGO_DEBUG: "False"
-    DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?Set allowed hosts}
-    DATABASE_BACKEND: postgresql
-    POSTGRES_HOST: fresh-postgres
-    POSTGRES_DB: onepost_fresh
-    POSTGRES_USER: onepost_app
-    POSTGRES_SSLMODE: disable
-    REDIS_URL: redis://fresh-redis:6379/0
-    PYTHONDONTWRITEBYTECODE: "1"
-    ONEPOST_POLLING_HANDOFF: ${ONEPOST_POLLING_HANDOFF:-pending}
-  secrets: [postgres_password, django_secret_key, telegram_bot_token, telegram_api_id, telegram_api_hash, telegram_session_encryption_key]
-  networks: [data, outbound]
-  depends_on:
-    fresh-postgres: {condition: service_healthy}
-    fresh-redis: {condition: service_healthy}
-  healthcheck:
-    test: [CMD, python, -m, production.entrypoint, python, -m, production.verify]
-    interval: 60s
-    timeout: 10s
-    retries: 3
-    start_period: 30s
-  logging: &logging
-    driver: json-file
-    options: {max-size: "5m", max-file: "2"}
+  stop_grace_period: 90s
+  environment: *environment
+  secrets: [django_secret_key, db_password, redis_password, telegram_bot_token, telegram_api_id, telegram_api_hash, session_key]
+  logging: *logging
+  depends_on: &dependencies
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    initialize:
+      condition: service_completed_successfully
 
 services:
-  fresh-postgres:
-    image: postgres:16-alpine
+  db:
+    image: postgres:17-bookworm
     restart: unless-stopped
+    stop_grace_period: 60s
     environment:
-      POSTGRES_DB: onepost_fresh
-      POSTGRES_USER: onepost_bootstrap
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
-      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
-    secrets: [postgres_admin_password, postgres_password]
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_admin_password
+    secrets: [db_admin_password, db_password]
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./production/init-postgres.sh:/docker-entrypoint-initdb.d/10-app.sh:ro
-    networks: [data]
-    command: [postgres, -c, shared_buffers=64MB, -c, work_mem=1MB, -c, maintenance_work_mem=16MB, -c, max_connections=20, -c, autovacuum_max_workers=1, -c, autovacuum_work_mem=8MB, -c, min_wal_size=32MB, -c, max_wal_size=128MB, -c, log_min_error_statement=panic, -c, log_error_verbosity=terse]
-    mem_limit: 320m
-    cpus: 0.5
-    pids_limit: 100
+      - postgres-data:/var/lib/postgresql/data
+      - ./production/init-postgres.sh:/docker-entrypoint-initdb.d/10-onepost.sh:ro
     healthcheck:
-      test: [CMD-SHELL, pg_isready -U onepost_bootstrap -d onepost_fresh]
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U postgres -d postgres"]
       interval: 5s
       timeout: 3s
-      retries: 30
+      retries: 20
     logging: *logging
 
-  fresh-redis:
-    image: redis:7-alpine
+  redis:
+    image: redis:7.4-bookworm
     restart: unless-stopped
-    command: [redis-server, --appendonly, "yes", --maxmemory, 48mb, --maxmemory-policy, noeviction]
-    volumes: [redis_data:/data]
-    networks: [data]
-    mem_limit: 96m
-    cpus: 0.25
-    pids_limit: 64
+    stop_grace_period: 30s
+    entrypoint: [sh, /opt/onepost/redis-entrypoint.sh]
+    secrets: [redis_password]
+    volumes:
+      - redis-data:/data
+      - ./production/redis-entrypoint.sh:/opt/onepost/redis-entrypoint.sh:ro
     healthcheck:
-      test: [CMD, redis-cli, ping]
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$(cat /run/secrets/redis_password)" redis-cli --no-auth-warning ping | grep -qx PONG']
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
     logging: *logging
+
+  initialize:
+    <<: *app
+    restart: "no"
+    command: [python, -m, production.initialize]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - static-files:/app/staticfiles
 
   web:
     <<: *app
-    mem_limit: 192m
-    command: [sh, -c, 'python manage.py collectstatic --noinput --verbosity 0 && exec gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 1 --timeout 60 --worker-tmp-dir /tmp']
-    ports: ["127.0.0.1:18000:8000"]
+    volumes:
+      - static-files:/app/staticfiles:ro
+    healthcheck:
+      test: [CMD, python, -m, production.healthcheck]
+      interval: 20s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
 
   bot:
     <<: *app
     profiles: [live]
-    mem_limit: 256m
     command: [python, -m, bot.main]
+    deploy:
+      replicas: 1
 
-  celery-worker:
+  worker:
     <<: *app
     profiles: [live]
-    mem_limit: 320m
-    stop_grace_period: 60s
-    command: [celery, -A, config, worker, --loglevel=INFO, --pool=solo, --hostname=fresh@%h]
+    command: [celery, -A, config, worker, -l, INFO, --pool=prefork, "--concurrency=${CELERY_CONCURRENCY:-2}", --prefetch-multiplier=1, -Q, "publishing,notifications,celery"]
+    deploy:
+      replicas: 1
 
-  celery-beat:
+  scheduler:
     <<: *app
     profiles: [live]
-    mem_limit: 128m
-    command: [celery, -A, config, beat, --loglevel=INFO, --schedule=/tmp/celerybeat-schedule]
+    command: [python, manage.py, run_publishing_scheduler]
+    deploy:
+      replicas: 1
 
-networks:
-  data: {internal: true}
-  outbound: {}
+  beat:
+    <<: *app
+    profiles: [live]
+    command: [celery, -A, config, beat, -l, INFO, --schedule=/app/state/beat/celerybeat-schedule, --pidfile=/tmp/celerybeat.pid]
+    volumes:
+      - beat-state:/app/state/beat
+    deploy:
+      replicas: 1
+
+  proxy:
+    image: ${PROXY_IMAGE:-onepost-nginx:production}
+    build:
+      context: .
+      dockerfile: production/nginx.Dockerfile
+    restart: unless-stopped
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    environment:
+      PUBLIC_IP: ${PUBLIC_IP:?Set PUBLIC_IP}
+    ports: ["${ONEPOST_HTTP_BIND:-0.0.0.0}:${ONEPOST_HTTP_PORT:-80}:80", "${ONEPOST_HTTP_BIND:-0.0.0.0}:${ONEPOST_HTTPS_PORT:-443}:443"]
+    volumes:
+      - certificates:/etc/letsencrypt:ro
+      - acme-webroot:/var/www/acme:ro
+      - certificate-events:/run/cert-events:ro
+    tmpfs: [/tmp, /var/cache/nginx, /etc/nginx/conf.d]
+    depends_on:
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, "http://127.0.0.1:8081/"]
+      interval: 20s
+      timeout: 3s
+      retries: 3
+    logging: *logging
+
+  certbot:
+    image: ${CERTBOT_IMAGE:-onepost-certbot:5.9.0}
+    build:
+      context: .
+      dockerfile: production/certbot.Dockerfile
+    profiles: [ops]
+    environment: &tls-environment
+      PUBLIC_IP: ${PUBLIC_IP:?Set PUBLIC_IP}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL}
+    volumes: &tls-volumes
+      - certificates:/etc/letsencrypt
+      - acme-webroot:/var/www/acme
+      - certificate-events:/run/cert-events
+    logging: *logging
+
+  certificate-renewal:
+    image: ${CERTBOT_IMAGE:-onepost-certbot:5.9.0}
+    build:
+      context: .
+      dockerfile: production/certbot.Dockerfile
+    restart: unless-stopped
+    command: [renew-loop]
+    environment: *tls-environment
+    volumes: *tls-volumes
+    depends_on:
+      proxy:
+        condition: service_healthy
+    logging: *logging
+
 volumes:
-  postgres_data: {}
-  redis_data: {}
+  postgres-data:
+  redis-data:
+  static-files:
+  beat-state:
+  certificates:
+  acme-webroot:
+  certificate-events:
+
 secrets:
-  postgres_admin_password: {file: ./.production/secrets/postgres_admin_password}
-  postgres_password: {file: ./.production/secrets/postgres_password}
-  django_secret_key: {file: ./.production/secrets/django_secret_key}
-  telegram_bot_token: {file: ./.production/secrets/telegram_bot_token}
-  telegram_api_id: {file: ./.production/secrets/telegram_api_id}
-  telegram_api_hash: {file: ./.production/secrets/telegram_api_hash}
-  telegram_session_encryption_key: {file: ./.production/secrets/telegram_session_encryption_key}
+  django_secret_key:
+    file: ${ONEPOST_SECRETS_DIR:-./.production/secrets}/django_secret_key
+  db_password:
+    file: ${ONEPOST_SECRETS_DIR:-./.production/secrets}/db_password
+  db_admin_password:
+    file: ${ONEPOST_SECRETS_DIR:-./.production/secrets}/db_admin_password
+  redis_password:
+    file: ${ONEPOST_SECRETS_DIR:-./.production/secrets}/redis_password
+  telegram_bot_token:
+    file: ${ONEPOST_SECRETS_DIR:-./.production/secrets}/telegram_bot_token
+  telegram_api_id:
+    file: ${ONEPOST_SECRETS_DIR:-./.production/secrets}/telegram_api_id
+  telegram_api_hash:
+    file: ${ONEPOST_SECRETS_DIR:-./.production/secrets}/telegram_api_hash
+  session_key:
+    file: ${ONEPOST_SECRETS_DIR:-./.production/secrets}/session_key

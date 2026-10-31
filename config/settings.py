@@ -63,9 +63,7 @@ TEMPLATES = [{
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
-from config.database import database_config
-
-DATABASES = {"default": database_config(os.environ, BASE_DIR)}
+DATABASES = {}
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"

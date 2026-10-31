@@ -181,15 +181,15 @@ async def verify_code(message: Message, state: FSMContext) -> None:
     try:
         verified = await complete_login(telegram_user_id=message.from_user.id, code=code)
     except Exception as error:
-    	logger.error(
-        	"Telegram account verification failed: %s",
-        	type(error).__name__,
-    	)
-    	await message.answer(
-        	"⚠️ تعذر إكمال ربط الحساب، يرجى المحاولة لاحقًا"
-    	)
-    	await state.clear()
-    	return
+        logger.error(
+            "Telegram account verification failed: %s",
+            type(error).__name__,
+        )
+        await message.answer(
+            "⚠️ تعذر إكمال ربط الحساب، يرجى المحاولة لاحقًا"
+        )
+        await state.clear()
+        return
     if not verified:
         await state.set_state(AccountForm.waiting_for_password)
         await message.answer("🔐 الحساب محمي بالتحقق بخطوتين. أرسل كلمة مرور 2FA:")
@@ -241,8 +241,8 @@ async def show_account_details(callback: CallbackQuery) -> None:
     await callback.message.edit_text(
         f"📱 تفاصيل الحساب:\n\n"
         f"رقم الهاتف: {account.phone_number}\n"
-        f"الحالة: {status}\n\n"
-        "سيتم تفعيل تسجيل الدخول والتحقق في الخطوة التالية.",
+        f"الحالة: {status}\n\n",
+        #"سيتم تفعيل تسجيل الدخول والتحقق في الخطوة التالية.",
         reply_markup=account_details_keyboard(account.id),
     )
     await callback.answer()

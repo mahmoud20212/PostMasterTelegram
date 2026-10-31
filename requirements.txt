@@ -5,6 +5,7 @@ celery>=5.3,<6.0
 redis>=5.0,<6.0
 python-dotenv>=1.0,<2.0
 cryptography>=42.0,<46.0
-
 gunicorn>=23,<24
 whitenoise>=6.0,<7.0
+psycopg[binary]>=3.2,<4.0
+dj-database-url>=3.1.2,<4.0

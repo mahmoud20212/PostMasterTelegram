@@ -1,14 +1,16 @@
 from datetime import timedelta
+import time
 from uuid import uuid4
 
 from asgiref.sync import sync_to_async
-from django.db import transaction
+from django.db import OperationalError, transaction
 from django.utils import timezone
 
 from messages.models import SavedMessage
 from subscriptions.models import PaymentTransaction, PlanDuration, Subscription, SubscriptionPlan
 from telegram_groups.models import TelegramGroup
 from users.models import User
+from publishing.services.contention import bounded_transaction, is_sqlite_contention
 
 
 class SubscriptionLimitExceeded(ValueError):
@@ -66,7 +68,16 @@ def _ensure_subscription(user: User) -> Subscription:
 
 
 def _expire_subscription_if_needed(subscription: Subscription) -> Subscription:
+    from publishing.services.runs import _lock_user
+    with transaction.atomic():
+        _lock_user(subscription.user.telegram_user_id)
+        locked = Subscription.objects.select_for_update(of=("self",)).select_related("user", "plan_definition").get(pk=subscription.pk)
+        return _expire_subscription_locked(locked)
+
+
+def _expire_subscription_locked(subscription: Subscription) -> Subscription:
     if subscription.end_date and subscription.end_date <= timezone.now() and subscription.expired_at is None:
+        expiry_key = f"subscription-expired:{subscription.pk}:{subscription.end_date.isoformat()}"
         free_plan = _free_plan()
         user = subscription.user
         user.is_publishing = False
@@ -85,6 +96,8 @@ def _expire_subscription_if_needed(subscription: Subscription) -> Subscription:
             "plan_definition", "duration", "plan", "status", "start_date", "end_date",
             "limits_snapshot", "expired_at",
         ])
+        from notifications.events import emit
+        emit(user.pk, "subscription_expired", expiry_key)
     return subscription
 
 
@@ -129,6 +142,19 @@ def list_plan_durations(*, plan_id: int, payment_method: str | None = None) -> l
     return list(PlanDuration.objects.filter(**filters))
 
 
+def is_valid_payment_offer(duration: PlanDuration) -> bool:
+    """Validate catalogue rows even if they bypassed Model.clean (e.g. imports)."""
+    if not duration.is_active or duration.days <= 0 or duration.price <= 0:
+        return False
+    if duration.payment_method == "manual":
+        return duration.currency == "USD"
+    return (
+        duration.payment_method == "telegram_stars"
+        and duration.currency == "XTR"
+        and duration.price == duration.price.to_integral_value()
+    )
+
+
 @sync_to_async
 def mark_expired_subscriptions() -> int:
     total = 0
@@ -139,9 +165,11 @@ def mark_expired_subscriptions() -> int:
     )
     for subscription in expired:
         with transaction.atomic():
+            from publishing.services.runs import _lock_user
+            _lock_user(subscription.user.telegram_user_id)
             locked = Subscription.objects.select_for_update().select_related("user").get(pk=subscription.pk)
             if locked.expired_at is None:
-                _expire_subscription_if_needed(locked)
+                _expire_subscription_locked(locked)
                 total += 1
     return total
 
@@ -158,10 +186,14 @@ def converted_remaining_days(*, remaining_days: int, old_duration: PlanDuration,
 
 @sync_to_async
 def create_pending_payment(*, telegram_user_id: int, duration_id: int, payment_method: str) -> PaymentTransaction:
+    if payment_method == "manual":
+        return _pending_manual_payment(telegram_user_id=telegram_user_id, duration_id=duration_id)
     user = User.objects.get(telegram_user_id=telegram_user_id)
     duration = PlanDuration.objects.select_related("plan").get(
         pk=duration_id, is_active=True, plan__is_active=True, plan__is_free=False,
     )
+    if duration.payment_method != payment_method or not is_valid_payment_offer(duration):
+        raise ValueError("Payment offer is unavailable.")
     payment = PaymentTransaction.objects.create(
         user=user,
         plan=duration.plan,
@@ -173,6 +205,46 @@ def create_pending_payment(*, telegram_user_id: int, duration_id: int, payment_m
         status=PaymentTransaction.PENDING,
     )
     return payment
+
+
+def _pending_manual_payment(*, telegram_user_id: int, duration_id: int) -> PaymentTransaction:
+    # A burst of clicks can exceed the short publishing-transition retry window on
+    # SQLite. Retry only this fully rolled-back transaction, for at most 1.1s of
+    # backoff. PostgreSQL still relies on the existing per-user database row lock.
+    for attempt in range(8):
+        try:
+            return _pending_manual_payment_once(telegram_user_id=telegram_user_id, duration_id=duration_id)
+        except OperationalError as error:
+            if not is_sqlite_contention(error) or attempt == 7:
+                raise
+            time.sleep(min(0.05 * (attempt + 1), 0.2))
+
+
+def _pending_manual_payment_once(*, telegram_user_id: int, duration_id: int) -> PaymentTransaction:
+    from publishing.services.runs import _lock_user
+    with bounded_transaction():
+        # First-write serialization also works on SQLite, where FOR UPDATE is a no-op.
+        user = _lock_user(telegram_user_id)
+        if user is None:
+            raise User.DoesNotExist
+        duration = PlanDuration.objects.select_related("plan").get(
+            pk=duration_id, is_active=True, plan__is_active=True, plan__is_free=False,
+            payment_method="manual", currency="USD",
+        )
+        if not is_valid_payment_offer(duration):
+            raise ValueError("Payment offer is unavailable.")
+        existing = PaymentTransaction.objects.select_related("plan", "duration").filter(
+            user=user, plan_id=duration.plan_id, duration=duration,
+            payment_method="manual", status=PaymentTransaction.PENDING,
+        ).order_by("created_at", "pk").first()
+        if existing is not None:
+            return existing
+        return PaymentTransaction.objects.create(
+            user=user, plan=duration.plan, duration=duration, payment_method="manual",
+            amount=duration.price, currency=duration.currency,
+            invoice_payload=f"subscription:{user.pk}:{duration.pk}:{uuid4().hex}",
+            status=PaymentTransaction.PENDING,
+        )
 
 
 @sync_to_async
@@ -200,7 +272,7 @@ def activate_manual_payment(*, payment_id: int) -> Subscription:
         payment.status = PaymentTransaction.PAID
         payment.paid_at = timezone.now()
         payment.save(update_fields=["status", "paid_at"])
-        return _activate_paid_subscription_locked(user=payment.user, duration=payment.duration)
+        return _activate_paid_subscription_locked(user=payment.user, duration=payment.duration, event_key=f"payment:{payment.pk}")
 
 
 @sync_to_async
@@ -230,14 +302,26 @@ def finalize_stars_payment(*, payload: str, telegram_user_id: int, charge_id: st
         payment.telegram_payment_charge_id = charge_id
         payment.paid_at = timezone.now()
         payment.save(update_fields=["status", "provider_payment_id", "telegram_payment_charge_id", "paid_at"])
-        subscription = _activate_paid_subscription_locked(user=payment.user, duration=payment.duration)
+        subscription = _activate_paid_subscription_locked(user=payment.user, duration=payment.duration, event_key=f"payment:{payment.pk}")
         return payment, subscription
 
 
-def _activate_paid_subscription_locked(*, user: User, duration: PlanDuration) -> Subscription:
+@transaction.atomic
+def _activate_paid_subscription_locked(*, user: User, duration: PlanDuration, event_key=None) -> Subscription:
+    from publishing.services.runs import _lock_user
+    from notifications.events import emit
+    from notifications.models import BotNotification
+    from publishing.models import PublishingSettings
+    user = _lock_user(user.telegram_user_id)
     subscription = _ensure_subscription(user)
+    subscription = Subscription.objects.select_for_update(of=("self",)).select_related("plan_definition").get(pk=subscription.pk)
+    if event_key and BotNotification.objects.filter(event_key=event_key).exists():
+        return subscription
     now = timezone.now()
     active_end = subscription.end_date if subscription.end_date and subscription.end_date > now else None
+    old_plan = subscription.plan_definition.name
+    same_plan = subscription.plan_definition_id == duration.plan_id
+    was_paid = not subscription.plan_definition.is_free and bool(active_end)
     credited_days = 0
     if active_end and subscription.plan_definition_id == duration.plan_id:
         start = subscription.start_date or now
@@ -266,6 +350,10 @@ def _activate_paid_subscription_locked(*, user: User, duration: PlanDuration) ->
     ])
     user.current_plan = duration.plan.code
     user.save(update_fields=["current_plan"])
+    kind = "subscription_renewed" if same_plan and was_paid else "subscription_changed" if was_paid else "subscription_activated"
+    zone = PublishingSettings.objects.filter(user=user).values_list("timezone", flat=True).first() or "Asia/Gaza"
+    emit(user.pk, kind, event_key or f"activation:{uuid4()}", payload={
+        "plan": duration.plan.name, "old_plan": old_plan, "until": end.isoformat(), "timezone": zone})
     return subscription
 
 
@@ -303,5 +391,5 @@ def complete_demo_payment(*, telegram_user_id: int, duration_id: int, payment_me
             provider_payment_id=f"demo-{timezone.now().timestamp()}",
             paid_at=timezone.now(),
         )
-        subscription = _activate_paid_subscription_locked(user=user, duration=duration)
+        subscription = _activate_paid_subscription_locked(user=user, duration=duration, event_key=f"payment:{payment.pk}")
         return payment, subscription

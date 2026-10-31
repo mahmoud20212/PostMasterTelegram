@@ -4,14 +4,13 @@ This deliberately avoids relying on SELECT FOR UPDATE on SQLite. Conditional
 updates serialize competing starts; no database transaction spans Telegram I/O.
 """
 from asgiref.sync import sync_to_async
-from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 
 from messages.models import SavedMessage
 from publishing.models import PublishingRun, PublishingSettings
 from publishing.services.policy import _normalise
-from publishing.services.contention import retry_transition
+from publishing.services.contention import bounded_transaction, retry_transition
 from subscriptions.models import Subscription
 from subscriptions.services.subscriptions import _ensure_subscription
 from telegram_accounts.models import TelegramAccount
@@ -32,7 +31,7 @@ def _subscription_allowed(subscription):
 
 @retry_transition
 def create_run(telegram_user_id):
-    with transaction.atomic():
+    with bounded_transaction():
         # A compare-and-set, including on SQLite: only one caller can win.
         if not User.objects.filter(telegram_user_id=telegram_user_id, is_publishing=False).update(is_publishing=True):
             return None, "النشر يعمل بالفعل."
@@ -53,17 +52,22 @@ def create_run(telegram_user_id):
             return None, error
         # Clean up an invalidated legacy/expired run without ever reusing its ID.
         PublishingRun.objects.filter(user=user, active=True).update(active=False, stopped_at=timezone.now())
-        run = PublishingRun.objects.create(user=user, account=account)
+        run = PublishingRun.objects.create(
+            user=user, account=account, scheduler_version=2, next_due_at=timezone.now(),
+        )
         settings, _ = PublishingSettings.objects.get_or_create(user=user)
         settings.cycle_started_at = timezone.now()
         settings.is_running = True
         settings.save(update_fields=["cycle_started_at", "is_running"])
+        from publishing.services.work_rest import reset_work
+        reset_work(run, settings, timezone.now())
+        run.save()
         return run, "تم تشغيل محرك النشر."
 
 
 @retry_transition
 def finish_run(telegram_user_id, run_id=None):
-    with transaction.atomic():
+    with bounded_transaction():
         user = _lock_user(telegram_user_id)
         if user is None:
             return False
@@ -73,7 +77,7 @@ def finish_run(telegram_user_id, run_id=None):
             if not runs.exists():
                 return False
         User.objects.filter(pk=user.pk).update(is_publishing=False)
-        runs.update(active=False, stopped_at=timezone.now())
+        runs.update(active=False, stopped_at=timezone.now(), dispatch_token=None, dispatch_expires_at=None)
         PublishingSettings.objects.filter(user_id=user.pk).update(is_running=False)
         return True
 
@@ -90,7 +94,7 @@ def _lock_user(telegram_user_id):
 
 @retry_transition
 def update_run_settings(telegram_user_id, run_id, **changes):
-    with transaction.atomic():
+    with bounded_transaction():
         user = _lock_user(telegram_user_id)
         if user is None or not user.is_publishing:
             return False
@@ -102,7 +106,7 @@ def update_run_settings(telegram_user_id, run_id, **changes):
 @retry_transition
 def recover_legacy_user(telegram_user_id):
     """Administrative operation: never touches a user with a new active run."""
-    with transaction.atomic():
+    with bounded_transaction():
         user = _lock_user(telegram_user_id)
         if user is None or not user.is_publishing:
             return False

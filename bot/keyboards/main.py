@@ -17,19 +17,26 @@ def main_menu_keyboard(*, is_publishing: bool = False, counts: dict | None = Non
     sleep_text = "🌙 السكون: مفعل" if counts.get("sleep_enabled", False) else "🌙 السكون: متوقف"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=publishing_text, callback_data=publishing_callback)],
+        [InlineKeyboardButton(text="🎯 تحديد حساب النشر", callback_data="accounts:select")],
         [
             InlineKeyboardButton(text=f"💬 الرسائل ({counts['messages']})", callback_data="messages:list"),
-            InlineKeyboardButton(text=f"👥 مجموعاتي ({counts['groups']})", callback_data="groups:list"),
+            InlineKeyboardButton(text=f"👥 المجموعات ({counts['groups']})", callback_data="groups:list"),
         ],
         [
             InlineKeyboardButton(text=f"📱 الحسابات ({counts['accounts']})", callback_data="accounts:list"),
             InlineKeyboardButton(text=f"⏱️ التوقيت ({counts['cycle_minutes']} د)", callback_data="publishing:settings"),
         ],
-        [InlineKeyboardButton(text="🎯 تحديد حساب النشر", callback_data="accounts:select")],
-        [
-            InlineKeyboardButton(text="📊 الإحصائيات", callback_data="reports:statistics"),
-            InlineKeyboardButton(text="💎 الخطط والباقات", callback_data="subscription:details"),
-        ],
         [InlineKeyboardButton(text=sleep_text, callback_data="sleep:settings")],
-        [InlineKeyboardButton(text="👨‍💻 التواصل مع المطور", url=DEVELOPER_URL)],
+        [
+            InlineKeyboardButton(text="💎 الباقات", callback_data="subscription:details"),
+            InlineKeyboardButton(text="📊 الإحصائيات", callback_data="reports:statistics"),
+        ],
+        [InlineKeyboardButton(text="📖 دليل الاستخدام", callback_data="guide:show")],
+        [InlineKeyboardButton(text="🎧 الدعم الفني", url=DEVELOPER_URL)],
+    ])
+
+
+def guide_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ القائمة الرئيسية", callback_data="menu:main")],
     ])

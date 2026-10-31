@@ -2,7 +2,7 @@ from asgiref.sync import sync_to_async
 from django.utils import timezone
 
 from messages.models import SavedMessage
-from publishing.models import PublishingSettings
+from publishing.models import PublishingRun, PublishingSettings
 from subscriptions.models import PaymentTransaction, Subscription
 from telegram_accounts.models import TelegramAccount
 from telegram_groups.models import TelegramGroup
@@ -24,8 +24,10 @@ def get_statistics(*, telegram_user_id: int) -> dict:
     pending_payments = PaymentTransaction.objects.filter(user=user, status=PaymentTransaction.PENDING)
     last_payment = PaymentTransaction.objects.filter(user=user).order_by("-created_at").first()
     publishing_account = accounts.filter(is_publishing_account=True).first()
+    run = PublishingRun.objects.filter(user=user, active=True).first()
+    publishing_status = "في فترة الراحة" if user.is_publishing and run and run.work_rest_phase == "rest" else "يعمل" if user.is_publishing else "متوقف"
     return {
-        "publishing_status": "يعمل" if user.is_publishing else "متوقف",
+        "publishing_status": publishing_status,
         "messages": messages.count(),
         "active_messages": messages.filter(is_active=True).count(),
         "groups": groups.count(),

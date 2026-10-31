@@ -1,7 +1,7 @@
 """V2.0 compatibility planner: values in, values out; no I/O or implicit clock.
 
-Not wired into the production engine. ``now`` is always supplied by the caller;
-quiet-hour callers must also supply the same local wall clock used by V1.
+The live sender reuses cycle_pairs. Legacy wall-clock helpers remain for
+compatibility; live elapsed-time work/rest phases are in services.work_rest.
 """
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta

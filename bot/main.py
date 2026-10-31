@@ -6,7 +6,10 @@ from aiogram import Bot, Dispatcher
 from dotenv import load_dotenv
 
 load_dotenv()
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+os.environ.setdefault(
+    "DJANGO_SETTINGS_MODULE",
+    "config.settings.local",
+)
 django.setup()
 
 from bot.handlers.router import build_router

@@ -10,6 +10,12 @@ __pycache__/
 !.env.postgres-staging.example
 !.env.production.example
 .production/
+.env.production
+.production/secrets/
+celerybeat-schedule.*
+*.sql
+*.zip
+*.tar
 *.pgdump
 *.sql.gz
 .staging/

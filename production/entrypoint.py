@@ -1,25 +1,18 @@
-"""Load file secrets without putting their values in command lines or Compose."""
 import os
-from pathlib import Path
 import sys
+
+from production.runtime import load_environment
 
 
 def main():
-    if os.environ.get("DATABASE_BACKEND") != "postgresql" or os.environ.get("POSTGRES_HOST") != "fresh-postgres":
-        raise SystemExit("Fresh production requires its dedicated PostgreSQL service")
-    if os.environ.get("REDIS_URL") != "redis://fresh-redis:6379/0":
-        raise SystemExit("Fresh production requires its dedicated Redis service")
-    for name in ("POSTGRES_PASSWORD", "DJANGO_SECRET_KEY", "TELEGRAM_BOT_TOKEN",
-                 "TELEGRAM_API_ID", "TELEGRAM_API_HASH", "TELEGRAM_SESSION_ENCRYPTION_KEY"):
-        os.environ[name] = Path("/run/secrets", name.lower()).read_text().strip()
-        if not os.environ[name]:
-            raise SystemExit("Required secret file is empty")
+    try:
+        load_environment()
+    except ValueError as error:
+        raise SystemExit(str(error)) from None
     command = sys.argv[1:]
-    if command and (command[0] == "celery" or command == ["python", "-m", "bot.main"]):
-        if os.environ.get("ONEPOST_POLLING_HANDOFF") != "confirmed-exclusive-token":
-            raise SystemExit("Operator must confirm exclusive token ownership before live services")
     if not command:
-        raise SystemExit("An explicit command is required")
+        raise SystemExit("A process command is required")
+    # Do not leave a shell/Python wrapper between Docker SIGTERM and the process.
     os.execvp(command[0], command)
 
 

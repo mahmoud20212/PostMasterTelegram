@@ -16,3 +16,6 @@ class TelegramAccount(models.Model):
     last_error_at = models.DateTimeField(null=True, blank=True)
     last_notified_at = models.DateTimeField(null=True, blank=True)
 
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["user"], condition=models.Q(is_publishing_account=True), name="one_selected_account_per_user")]
+

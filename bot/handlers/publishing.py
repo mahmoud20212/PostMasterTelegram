@@ -1,7 +1,6 @@
 from aiogram import Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from asgiref.sync import sync_to_async
 
 from bot.keyboards.publishing import publishing_settings_keyboard
 from bot.states.publishing import PublishingSettingsForm
@@ -9,14 +8,14 @@ from publishing.services.settings import update_cycle_duration
 from publishing.services.engine import start_publishing, stop_publishing
 from bot.keyboards.main import main_menu_keyboard
 from bot.ui.home import home_text
-from users.models import User
+from users.services.onboarding import get_telegram_user
 from users.services.dashboard import get_dashboard_counts
 
 router = Router(name="publishing")
 
 
 async def _refresh_main_menu(callback: CallbackQuery) -> None:
-    user = await sync_to_async(User.objects.get)(telegram_user_id=callback.from_user.id)
+    user = await get_telegram_user(telegram_user_id=callback.from_user.id)
     counts = await get_dashboard_counts(telegram_user_id=user.telegram_user_id)
     await callback.message.edit_text(
         home_text(user),

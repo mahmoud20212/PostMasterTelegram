@@ -14,12 +14,12 @@ def groups_keyboard(groups, *, include_add: bool = True) -> InlineKeyboardMarkup
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def group_add_methods_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🖊️ إضافة يدوية", callback_data="groups:add_manual")],
-        [InlineKeyboardButton(text="🔍 استخراج من رقمي تلقائياً", callback_data="groups:extract")],
-        [InlineKeyboardButton(text="↩️ رجوع", callback_data="groups:list")],
-    ])
+def group_add_methods_keyboard(*, allow_extract: bool = False) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text="✏️ إضافة يدوية", callback_data="groups:add_manual")]]
+    if allow_extract:
+        rows.append([InlineKeyboardButton(text="🔍 استخراج من رقمي تلقائياً", callback_data="groups:extract")])
+    rows.append([InlineKeyboardButton(text="↩️ رجوع", callback_data="groups:list")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def delete_all_groups_keyboard() -> InlineKeyboardMarkup:

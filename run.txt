@@ -1,5 +1,5 @@
-docker compose up -d redis
 docker run -it --rm --name redis -p 6379:6379 redis
-.\.venv\Scripts\celery.exe -A config worker --loglevel=INFO --pool=solo
-.\.venv\Scripts\celery.exe -A config beat --loglevel=INFO
+.\.venv\Scripts\celery.exe -A config worker -l INFO --pool=threads --concurrency=4 --prefetch-multiplier=1 -Q publishing,notifications,celery
+.\.venv\Scripts\python.exe manage.py run_publishing_scheduler
+.\.venv\Scripts\celery.exe -A config beat -l INFO
 .\.venv\Scripts\python.exe -m bot.main

@@ -1,1 +1,1 @@
-"""Opt-in fresh production deployment helpers."""
+"""Production deployment tooling; importing this package has no side effects."""

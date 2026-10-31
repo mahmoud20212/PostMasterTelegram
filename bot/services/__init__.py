@@ -1,1 +1,1 @@
-"""Bot-facing application services."""
+"""Telegram bot services."""

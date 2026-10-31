@@ -10,10 +10,10 @@ def accounts_keyboard(accounts, *, include_add: bool = True) -> InlineKeyboardMa
     if include_add:
         rows.append([InlineKeyboardButton(text="➕ إضافة حساب", callback_data="accounts:add")])
     for account in accounts:
-        status = "🟢" if account.status == "connected" else "🟡"
-        selected = " 🎯" if account.is_publishing_account else ""
-        label = (account.phone_number or "حساب بدون رقم") + selected
-        rows.append([InlineKeyboardButton(text=f"{status} {label}", callback_data=f"accounts:view:{account.id}")])
+        # status = "🟢" if account.status == "connected" else "🟡"
+        # selected = " 🎯" if account.is_publishing_account else ""
+        label = (account.phone_number or "حساب بدون رقم") # + selected
+        rows.append([InlineKeyboardButton(text=f"{label}", callback_data=f"accounts:view:{account.id}")])
     rows.append([InlineKeyboardButton(text="↩️ رجوع", callback_data="menu:main" if include_add else "accounts:list")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -25,7 +25,7 @@ def publishing_account_keyboard(accounts) -> InlineKeyboardMarkup:
             continue
         selected = " ✅" if account.is_publishing_account else ""
         rows.append([InlineKeyboardButton(
-            text=f"📱 {account.phone_number}{selected}",
+            text=f"{account.phone_number}{selected}",
             callback_data=f"accounts:set_publish:{account.id}",
         )])
     rows.append([InlineKeyboardButton(text="↩️ رجوع", callback_data="menu:main")])

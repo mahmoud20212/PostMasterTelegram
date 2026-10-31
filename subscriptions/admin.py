@@ -47,6 +47,6 @@ class PaymentTransactionAdmin(admin.ModelAdmin):
                 locked.status = PaymentTransaction.PAID
                 locked.paid_at = timezone.now()
                 locked.save(update_fields=["status", "paid_at"])
-                _activate_paid_subscription_locked(user=locked.user, duration=locked.duration)
+                _activate_paid_subscription_locked(user=locked.user, duration=locked.duration, event_key=f"payment:{locked.pk}")
                 activated += 1
         self.message_user(request, f"Activated {activated} manual payment(s).")

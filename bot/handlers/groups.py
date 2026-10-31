@@ -6,8 +6,15 @@ from bot.keyboards.groups import delete_all_groups_keyboard, group_add_methods_k
 from bot.states.groups import GroupForm
 from telegram_groups.services.groups import create_group, delete_all_groups, delete_group, extract_groups_from_account, list_groups, toggle_group
 from telegram_accounts.services.accounts import has_connected_account
+from subscriptions.services.subscriptions import get_subscription
 
 router = Router(name="groups")
+
+
+async def _can_extract_groups(telegram_user_id: int) -> bool:
+    subscription = await get_subscription(telegram_user_id=telegram_user_id)
+    plan = subscription.plan_definition
+    return subscription.status == "active" and plan is not None and not plan.is_free
 
 
 def groups_text(groups, prefix="👥 مجموعاتك المحفوظة:") -> str:
@@ -37,7 +44,7 @@ async def show_group_add_methods(callback: CallbackQuery) -> None:
         return
     await callback.message.edit_text(
         "📥 إضافة مجموعات:\n\nاختر طريقة إضافة المجموعات لتفعيلها في النشر العام:",
-        reply_markup=group_add_methods_keyboard(),
+        reply_markup=group_add_methods_keyboard(allow_extract=await _can_extract_groups(callback.from_user.id)),
     )
     await callback.answer()
 
@@ -58,13 +65,16 @@ async def start_add_group(callback: CallbackQuery, state: FSMContext) -> None:
 async def extract_account_groups(callback: CallbackQuery) -> None:
     if callback.message is None or callback.from_user is None:
         return
+    if not await _can_extract_groups(callback.from_user.id):
+        await callback.answer("استخراج المجموعات تلقائيًا متاح للباقات المدفوعة فقط.", show_alert=True)
+        return
     await callback.answer("جارٍ استخراج المجموعات...")
     try:
         added, total = await extract_groups_from_account(telegram_user_id=callback.from_user.id)
     except Exception as error:
         await callback.message.edit_text(
             f"❌ تعذر استخراج المجموعات.\n\nالسبب: {error}",
-            reply_markup=group_add_methods_keyboard(),
+            reply_markup=group_add_methods_keyboard(allow_extract=await _can_extract_groups(callback.from_user.id)),
         )
         return
     groups = await list_groups(telegram_user_id=callback.from_user.id)
