@@ -28,7 +28,14 @@ def main():
         name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "OnePost isolated smoke CA")])
         ca = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(ca_key.public_key())
             .serial_number(x509.random_serial_number()).not_valid_before(now - timedelta(minutes=1))
-            .not_valid_after(now + timedelta(days=2)).add_extension(x509.BasicConstraints(ca=True, path_length=0), True)
+            .not_valid_after(now + timedelta(days=2)).add_extension(
+                x509.BasicConstraints(ca=True, path_length=0),
+                critical=True,
+            )
+            .add_extension(
+                x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key()),
+                critical=False,
+            )
             .sign(ca_key, hashes.SHA256()))
         (root / "key.pem").write_bytes(ca_key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
         (root / "key.pem").chmod(0o600)
@@ -37,7 +44,18 @@ def main():
     certificate = (x509.CertificateBuilder().subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "smoke")]))
         .issuer_name(ca.subject).public_key(key.public_key()).serial_number(x509.random_serial_number())
         .not_valid_before(now - timedelta(minutes=1)).not_valid_after(now + timedelta(days=1))
-        .add_extension(x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address(os.environ["PUBLIC_IP"]))]), False)
+        .add_extension(
+            x509.SubjectAlternativeName([
+                x509.IPAddress(ipaddress.ip_address(os.environ["PUBLIC_IP"]))
+            ]),
+            critical=False,
+        )
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(
+                ca_key.public_key()
+            ),
+            critical=False,
+        )
         .sign(ca_key, hashes.SHA256()))
     (live / "privkey.pem").write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
     (live / "privkey.pem").chmod(0o600)
