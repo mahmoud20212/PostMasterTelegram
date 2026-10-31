@@ -110,6 +110,13 @@ def main():
             connection = http.client.HTTPConnection("127.0.0.1", http_port, timeout=5)
             connection.request("GET", "/admin/login/", headers={"Host": "8.8.8.8"})
             response = connection.getresponse()
+            print(
+                "HTTP redirect:",
+                response.status,
+                "Location:",
+                response.getheader("Location"),
+                flush=True,
+            )
             assert response.status == 308 and response.getheader("Location") == "https://8.8.8.8/admin/login/"
             connection.close()
             assert dc("exec", "-T", "web", "id", "-u", capture=True).strip() == "10001", "Application runs as root"
