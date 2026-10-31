@@ -95,8 +95,16 @@ def main():
             ca_path.write_text(ca, encoding="ascii")
             context = ssl.create_default_context(cafile=str(ca_path))
             def ready_certificate():
-                status, certificate = https_request(tls_port, context)
-                return certificate if status == 200 else None
+                try:
+                    status, certificate = https_request(tls_port, context)
+                    print(f"HTTPS status: {status}", flush=True)
+                    return certificate if status == 200 else None
+                except Exception as error:
+                    print(
+                        f"HTTPS error: {type(error).__name__}: {error}",
+                        flush=True
+                    )
+                    return None
 
             original = wait_for(ready_certificate)
             connection = http.client.HTTPConnection("127.0.0.1", http_port, timeout=5)
