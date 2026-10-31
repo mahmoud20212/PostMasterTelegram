@@ -106,19 +106,38 @@ def main():
                     )
                     return None
 
+            
             original = wait_for(ready_certificate)
-            connection = http.client.HTTPConnection("127.0.0.1", http_port, timeout=5)
-            connection.request("GET", "/admin/login/", headers={"Host": "8.8.8.8"})
-            response = connection.getresponse()
-            print(
-                "HTTP redirect:",
-                response.status,
-                "Location:",
-                response.getheader("Location"),
-                flush=True,
-            )
-            assert response.status == 308 and response.getheader("Location") == "https://8.8.8.8/admin/login/"
-            connection.close()
+
+            def redirect_ready():
+                connection = http.client.HTTPConnection(
+                    "127.0.0.1", http_port, timeout=5
+                )
+                try:
+                    connection.request(
+                        "GET",
+                        "/admin/login/",
+                        headers={"Host": "8.8.8.8"},
+                    )
+                    response = connection.getresponse()
+                    status = response.status
+                    location = response.getheader("Location")
+                    response.read()
+
+                    print(
+                        f"HTTP redirect: {status} Location: {location}",
+                        flush=True,
+                    )
+
+                    return (
+                        status == 308
+                        and location == "https://8.8.8.8/admin/login/"
+                    )
+                finally:
+                    connection.close()
+
+            wait_for(redirect_ready, timeout=30)
+
             assert dc("exec", "-T", "web", "id", "-u", capture=True).strip() == "10001", "Application runs as root"
             probe("prepare")
             dc("run", "--rm", "--no-deps", "fixture", capture=True)
